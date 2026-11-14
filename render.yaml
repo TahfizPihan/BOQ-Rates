@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: boq-rate-matcher
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn server:app --workers 1 --threads 4 --timeout 180
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      - key: APP_PASSWORD
+        sync: false

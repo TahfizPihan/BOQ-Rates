@@ -1,0 +1,30 @@
+name: Build rate schedules
+
+# Runs when you edit sources.json, or press "Run workflow" in the Actions tab.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - sources.json
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Download PDFs and build rate CSVs
+        run: python tools/build_rates.py
+      - name: Save new rates to the repo
+        if: always()
+        run: |
+          git config user.name "rate-bot"
+          git config user.email "rate-bot@users.noreply.github.com"
+          git add data/schedules
+          git diff --cached --quiet || (git commit -m "Update rate schedules" && git push)
