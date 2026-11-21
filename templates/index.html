@@ -5,94 +5,68 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BOQ Rate Matcher</title>
 <style>
-  :root{--bg:#f5f6f8;--card:#fff;--ink:#1c2430;--mute:#667085;--line:#e3e6ec;--brand:#1f4e78;--brand2:#2b6aa3;
-        --green:#c6efce;--blue:#ddebf7;--yellow:#ffeb9c;--red:#ffc7ce}
+  :root{--bg:#f5f6f8;--card:#fff;--ink:#1c2430;--mute:#667085;--line:#e3e6ec;--brand:#1f4e78;--brand2:#2b6aa3}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
   header{background:var(--brand);color:#fff;padding:20px}
   header h1{margin:0;font-size:21px} header p{margin:4px 0 0;opacity:.88}
-  main{max-width:1000px;margin:0 auto;padding:16px;display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}
+  main{max-width:640px;margin:0 auto;padding:16px;display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;min-width:0}
-  td:nth-child(2){min-width:140px}
-  .card h2{margin:0 0 4px;font-size:17px} .sub{color:var(--mute);margin:0 0 12px}
-  button,.btn{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:10px 18px;font:inherit;cursor:pointer;text-decoration:none;display:inline-block}
+  button,.btn{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:11px 20px;font:inherit;cursor:pointer;text-decoration:none;display:inline-block}
   button:hover,.btn:hover{background:var(--brand2)} button:disabled{opacity:.5;cursor:not-allowed}
-  input,select{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff}
-  table{width:100%;border-collapse:collapse;font-size:13.5px} th,td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
-  th{background:#f0f3f8;position:sticky;top:0} .scroll{max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:8px}
-  .row{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
-  .drop{border:2px dashed #b8c2d3;border-radius:12px;padding:30px 16px;text-align:center;color:var(--mute);background:#fafbfd;cursor:pointer}
+  input{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px}
+  .drop{border:2px dashed #b8c2d3;border-radius:12px;padding:34px 16px;text-align:center;color:var(--mute);background:#fafbfd;cursor:pointer}
   .drop.over{border-color:var(--brand);background:#eef4fb} .drop b{color:var(--ink)}
-  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}
-  .stat{border-radius:10px;padding:12px;text-align:center} .stat b{display:block;font-size:24px}
-  .tag{padding:2px 8px;border-radius:99px;font-size:12px;white-space:nowrap}
-  .CODE{background:var(--green)}.DESC{background:var(--blue)}.REVIEW{background:var(--yellow)}.NONE{background:var(--red)}
-  .note{background:#fff8e1;border:1px solid #f0d98a;border-radius:10px;padding:12px 14px}
+  .note{background:#fff8e1;border:1px solid #f0d98a;border-radius:10px;padding:12px 14px;margin-bottom:12px}
   .err{background:#fde8e8;border:1px solid #f3b4b4;color:#8a1c1c;border-radius:10px;padding:10px 14px;margin-top:12px}
-  .hidden{display:none} .mute{color:var(--mute)} .chips span{display:inline-block;background:#eef1f6;border-radius:99px;padding:2px 10px;margin:2px 4px 2px 0;font-size:13px}
-  @media(max-width:700px){.stats{grid-template-columns:repeat(2,1fr)}}
+  .ok{background:#e8f6ec;border:1px solid #b5dfc1;border-radius:10px;padding:14px}
+  .hidden{display:none} .mute{color:var(--mute)} summary{cursor:pointer;margin-top:10px}
+  ul{margin:8px 0 0;padding-left:20px;font-size:14px} .row{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
 </style>
 </head>
 <body>
 <header>
   <h1>BOQ Rate Matcher</h1>
-  <p>Upload a BOQ (Excel or PDF) &rarr; get an Excel file with the rate filled in for every item.</p>
+  <p>Upload your BOQ (Excel or PDF). You get the same file back as Excel with the rates filled in.</p>
 </header>
 <main>
+  <section class="card">
+    <div id="empty" class="note hidden"><b>No rate schedule is loaded yet.</b> Add the schedule links in <code>sources.json</code> on GitHub
+      and run &ldquo;Build rate schedules&rdquo; (see README), then reload this page.</div>
 
-<section class="card">
-  <h2>Upload your BOQ</h2>
-  <p class="sub">Rates are taken from: <span id="chips" class="chips"></span></p>
-  <div id="empty" class="note hidden"><b>No rate schedule is loaded yet.</b> Add the PDF links to <code>sources.json</code> on GitHub and run the
-    &ldquo;Build rate schedules&rdquo; action (see README). Then reload this page.</div>
+    <div id="drop" class="drop"><b>Tap to choose</b> your BOQ (.xlsx or .pdf) or drag it here<br><span id="fname"></span></div>
+    <input id="boqFile" type="file" accept=".xlsx,.xlsm,.pdf" class="hidden">
 
-  <div id="drop" class="drop"><b>Tap to choose</b> your BOQ (.xlsx or .pdf) or drag it here<br><span id="fname"></span></div>
-  <input id="boqFile" type="file" accept=".xlsx,.xlsm,.pdf,.csv" class="hidden">
+    <details>
+      <summary class="mute">Options</summary>
+      <div class="row" style="margin-top:10px">
+        <label>Rate column (if the file has none marked) <input id="col" maxlength="3" placeholder="auto" style="width:70px;text-transform:uppercase"></label>
+        <label><input id="over" type="checkbox"> Replace rates already in the file</label>
+      </div>
+      <div id="agencyBox" class="row hidden" style="margin-top:10px"><span class="mute">Use only:</span><span id="agencies"></span></div>
+    </details>
 
-  <div class="row" style="margin-top:14px">
-    <label>Put rates in column <input id="col" maxlength="3" placeholder="auto" style="width:70px;text-transform:uppercase"></label>
-    <label>Auto-accept match &ge; <input id="thr" type="number" min="60" max="100" value="85" style="width:68px">%</label>
-    <label><input id="over" type="checkbox"> Replace rates already in the file</label>
-  </div>
-  <div id="agencyBox" class="row hidden" style="margin-top:10px"><span class="mute">Use only:</span><span id="agencies"></span></div>
-  <div class="row" style="margin-top:14px"><button id="go" disabled>Find rates &amp; create Excel</button><span id="busy" class="mute hidden">Working&hellip; large BOQs can take a minute.</span></div>
-  <div id="err" class="err hidden"></div>
-</section>
+    <div class="row" style="margin-top:16px"><button id="go" disabled>Fill rates</button><span id="busy" class="mute hidden">Working&hellip; large files can take a minute.</span></div>
+    <div id="err" class="err hidden"></div>
+  </section>
 
-<section id="result" class="card hidden">
-  <h2>Result</h2>
-  <div class="stats">
-    <div class="stat" style="background:#eef1f6"><b id="sTotal">0</b>items</div>
-    <div class="stat" style="background:var(--green)"><b id="sOk">0</b>matched</div>
-    <div class="stat" style="background:var(--yellow)"><b id="sChk">0</b>please check</div>
-    <div class="stat" style="background:var(--red)"><b id="sNo">0</b>no match</div>
-  </div>
-  <div class="row" style="margin-bottom:12px">
-    <a id="dl" class="btn" href="#">&#11015; Download Excel</a>
-    <span class="mute">Your BOQ with rates filled in, plus a <b>Match Report</b> sheet.</span>
-  </div>
-  <div class="scroll"><table><thead><tr><th>Row</th><th>BOQ item</th><th>Status</th><th>%</th><th>Code</th><th>Rate (Tk)</th><th>From</th></tr></thead><tbody id="rows"></tbody></table></div>
-  <p class="mute" style="margin-top:10px"><b>CHECK</b> = best guess, confirm it. <b>No match</b> = left blank; use the search below.</p>
-</section>
-
-<section class="card">
-  <h2>Search rates</h2>
-  <p class="sub">Look up any item by words or code.</p>
-  <input id="q" placeholder="e.g. brick work 1:4  or  4.2.1" style="width:100%">
-  <div id="searchOut" style="margin-top:12px"></div>
-</section>
+  <section id="result" class="card hidden">
+    <div class="ok">
+      <b id="summary"></b>
+      <div id="how" class="mute" style="font-size:14px;margin-top:2px"></div>
+      <div style="margin-top:12px"><a id="dl" class="btn" href="#">&#11015; Download Excel</a></div>
+    </div>
+    <details id="nfBox"><summary><span id="nfTitle"></span></summary><ul id="nfList"></ul></details>
+  </section>
 </main>
 
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const fmt = n => n == null ? '' : Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-const LABEL = {CODE:'by code',DESC:'by description',REVIEW:'CHECK',NONE:'no match'};
 let schedules = [];
 
 (async () => {
   schedules = await (await fetch('/api/schedules')).json();
-  $('#chips').innerHTML = schedules.length ? schedules.map(s => `<span>${esc(s.agency)} ${esc(s.edition)} &middot; ${s.items} items</span>`).join('') : '<span>nothing yet</span>';
   $('#empty').classList.toggle('hidden', schedules.length > 0);
   const ags = [...new Set(schedules.map(s => s.agency))];
   if(ags.length > 1){ $('#agencyBox').classList.remove('hidden');
@@ -106,35 +80,32 @@ drop.onclick = () => boq.click();
 ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => {e.preventDefault(); drop.classList.remove('over');}));
 drop.addEventListener('drop', e => { if(e.dataTransfer.files[0]){ boq.files = e.dataTransfer.files; picked(); }});
 boq.onchange = picked;
-function picked(){ $('#fname').innerHTML = boq.files[0] ? `<br>&#128196; <b>${esc(boq.files[0].name)}</b>` : ''; upd(); }
+function picked(){ $('#fname').innerHTML = boq.files[0] ? `<br>&#128196; <b>${esc(boq.files[0].name)}</b>` : ''; $('#result').classList.add('hidden'); upd(); }
 function upd(){ $('#go').disabled = !(boq.files[0] && schedules.length); }
 
 $('#go').onclick = async () => {
-  const btn = $('#go'); btn.disabled = true; $('#busy').classList.remove('hidden'); $('#err').classList.add('hidden');
-  const fd = new FormData(); fd.append('file', boq.files[0]); fd.append('threshold', $('#thr').value);
-  fd.append('rate_col', $('#col').value);
+  const btn = $('#go'); btn.disabled = true; $('#busy').classList.remove('hidden'); $('#err').classList.add('hidden'); $('#result').classList.add('hidden');
+  const fd = new FormData(); fd.append('file', boq.files[0]); fd.append('rate_col', $('#col').value);
   if($('#over').checked) fd.append('overwrite','1');
   document.querySelectorAll('.ag').forEach(c => { if(c.checked) fd.append('agencies', c.value); });
   try{
     const r = await fetch('/api/process', {method:'POST', body:fd});
     const j = await r.json().catch(() => ({error:'Server error - try again'}));
     if(!r.ok) throw new Error(j.error);
-    $('#sTotal').textContent = j.total; $('#sOk').textContent = j.matched; $('#sChk').textContent = j.check; $('#sNo').textContent = j.none;
+    $('#summary').textContent = `Rates filled for ${j.filled} of ${j.items} items.`;
+    const parts = [`${j.by_desc} by exact description`, `${j.by_code} by item code`];
+    if(j.had_rate) parts.push(`${j.had_rate} already had a rate`);
+    $('#how').textContent = parts.join(' · ') + (j.conflicts ? ` · ${j.conflicts} found in more than one schedule with different rates (PWD, then LGED, then RHD used)` : '');
     $('#dl').href = '/download/' + j.id;
-    $('#rows').innerHTML = j.rows.map(x => `<tr><td>${x.row}</td><td>${esc(x.description)}</td>
-      <td><span class="tag ${x.status}">${LABEL[x.status]}</span></td><td>${x.score}</td><td>${esc(x.code)}</td>
-      <td>${fmt(x.rate)}</td><td>${esc(x.source)}</td></tr>`).join('');
+    const nf = j.not_filled;
+    $('#nfBox').classList.toggle('hidden', nf.length === 0);
+    $('#nfTitle').textContent = `${nf.length} item${nf.length===1?'':'s'} left blank (no exact match)`;
+    $('#nfList').innerHTML = nf.slice(0, 60).map(x => `<li>Row ${x.row}&nbsp;&middot;&nbsp;${esc(x.text)} <span class="mute">&mdash; ${esc(x.reason)}</span></li>`).join('')
+      + (nf.length > 60 ? `<li class="mute">&hellip;and ${nf.length - 60} more</li>` : '');
     $('#result').classList.remove('hidden'); $('#result').scrollIntoView({behavior:'smooth'});
   }catch(e){ $('#err').textContent = e.message; $('#err').classList.remove('hidden'); }
   $('#busy').classList.add('hidden'); upd();
 };
-
-let t; $('#q').oninput = e => { clearTimeout(t); t = setTimeout(async () => {
-  const q = e.target.value.trim(); if(!q){ $('#searchOut').innerHTML=''; return; }
-  const rows = await (await fetch('/api/search?q=' + encodeURIComponent(q))).json();
-  $('#searchOut').innerHTML = rows.length ? '<div class="scroll"><table><thead><tr><th>%</th><th>From</th><th>Code</th><th>Description</th><th>Unit</th><th>Rate (Tk)</th></tr></thead><tbody>' +
-    rows.map(x => `<tr><td>${x.score}</td><td>${esc(x.agency)} ${esc(x.edition)}</td><td>${esc(x.code)}</td><td>${esc(x.description)}</td><td>${esc(x.unit)}</td><td>${fmt(x.rate)}</td></tr>`).join('') + '</tbody></table></div>' : '<p class="mute">No results.</p>';
-}, 250); };
 </script>
 </body>
 </html>
