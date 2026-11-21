@@ -1,12 +1,12 @@
-"""Fill an Excel BOQ with rates from the saved schedules, keeping the original layout."""
+"""Fill the rate column of the person's own BOQ file. Nothing else in the file is changed or added."""
 import re
-from copy import copy
+
 from openpyxl import load_workbook
-from openpyxl.styles import PatternFill, Font
+from openpyxl.cell.cell import MergedCell
 from openpyxl.utils import column_index_from_string, get_column_letter
 
-from matcher import Matcher
 from db import load_items
+from exact import ExactMatcher, is_distinct_code
 
 KEYS = {
     "item": ["item no", "item no.", "item code", "code", "sl", "sl no", "sl.", "s/n", "ref", "sn", "no."],
@@ -15,12 +15,6 @@ KEYS = {
     "qty": ["qty", "quantity", "qty.", "quantities"],
     "rate": ["rate", "unit rate", "rate (tk)", "rate in tk", "rate (taka)", "price", "unit price"],
     "amount": ["amount", "total", "amount (tk)", "total amount", "amount in tk"],
-}
-FILLS = {
-    "CODE": PatternFill("solid", fgColor="C6EFCE"),
-    "DESC": PatternFill("solid", fgColor="DDEBF7"),
-    "REVIEW": PatternFill("solid", fgColor="FFEB9C"),
-    "NONE": PatternFill("solid", fgColor="FFC7CE"),
 }
 
 
@@ -43,103 +37,84 @@ def find_header(ws, scan_rows=40):
     return None, None
 
 
-def fill_boq(in_path, out_path, agencies=None, threshold=85, overwrite=False, progress=None, rate_col=None):
+def _blank(v):
+    return v is None or str(v).strip() in ("", "0", "0.0")
+
+
+def _row_codes(ws, r, desc_col):
+    """Anything in the columns left of the description that looks like an item code."""
+    out = []
+    for c in range(1, desc_col):
+        v = ws.cell(r, c).value
+        if v is None:
+            continue
+        out += [t for t in re.split(r"[\s,;]+", str(v).strip()) if is_distinct_code(t)]
+    return out
+
+
+def fill_boq(in_path, out_path, agencies=None, overwrite=False, rate_col=None):
     items = load_items(agencies)
     if not items:
-        raise ValueError("No rate schedule loaded for the selected agencies. Import a schedule first.")
-    matcher = Matcher(items)
+        raise ValueError("No rate schedule is loaded yet (see README: add the schedule links and build them).")
+    matcher = ExactMatcher(items)
     wb = load_workbook(in_path)
-    report = []
+    res = {"items": 0, "by_code": 0, "by_desc": 0, "had_rate": 0, "conflicts": 0, "not_filled": []}
+    found_table = False
     for ws in wb.worksheets:
         hr, cols = find_header(ws)
         if not hr:
             continue
-        # the person can name the column the rates must go into (e.g. "F")
+        found_table = True
         if rate_col:
             try:
                 cols["rate"] = column_index_from_string(str(rate_col).strip().upper())
             except ValueError:
-                raise ValueError(f"'{rate_col}' is not a valid column letter (use letters such as F or G).")
-            if _is(ws.cell(hr, cols["rate"]).value, "desc") or cols["rate"] == cols["desc"]:
+                raise ValueError(f"'{rate_col}' is not a column letter (use letters such as F or G).")
+            if cols["rate"] == cols["desc"]:
                 raise ValueError("The rate column cannot be the Description column.")
-            if not ws.cell(hr, cols["rate"]).value:
-                ws.cell(hr, cols["rate"], "Rate (Tk)")
-        # add rate / amount columns if the BOQ has none
-        last = max(ws.max_column, cols.get("rate", 0))
-        if "rate" not in cols:
-            last += 1
-            cols["rate"] = last
-            ws.cell(hr, last, "Rate (Tk)")
-        extra = {}
-        for name in ("Matched Code", "Matched Description", "Source", "Match %", "Status"):
-            last += 1
-            extra[name] = last
-            h = ws.cell(hr, last, name)
-            h.font = Font(bold=True)
-        if "amount" not in cols and "qty" in cols:
-            last += 1
-            cols["amount"] = last
-            ws.cell(hr, last, "Amount (Tk)")
-        total_rows = ws.max_row - hr
+        if "rate" not in cols:  # the file has no rate column at all: add one at the end, styled like its neighbour
+            col = ws.max_column + 1
+            ws.cell(hr, col, "Rate (Tk)")._style = ws.cell(hr, col - 1)._style
+            cols["rate"] = col
+        elif not ws.cell(hr, cols["rate"]).value:
+            ws.cell(hr, cols["rate"], "Rate (Tk)")
         for r in range(hr + 1, ws.max_row + 1):
             desc = ws.cell(r, cols["desc"]).value
-            if not desc or not str(desc).strip() or _is(desc, "desc"):
-                continue  # empty row, or a repeated table header (PDF pages)
-            qty = ws.cell(r, cols["qty"]).value if "qty" in cols else None
+            if desc is None or not str(desc).strip() or _is(desc, "desc"):
+                continue  # empty row, or a table header repeated on a new PDF page
             unit = ws.cell(r, cols["unit"]).value if "unit" in cols else None
-            item_cell = ws.cell(r, cols["item"]).value if "item" in cols else None
-            # skip pure heading rows (no unit and no quantity)
-            if "qty" in cols and not qty and not unit:
+            qty = ws.cell(r, cols["qty"]).value if "qty" in cols else None
+            is_item = not (_blank(unit) and _blank(qty)) if ("unit" in cols or "qty" in cols) else True
+            rate_cell = ws.cell(r, cols["rate"])
+            if isinstance(rate_cell, MergedCell):
                 continue
-            m = matcher.match(item_cell, desc, unit, threshold=threshold)
-            it = m["item"]
-            existing = ws.cell(r, cols["rate"]).value
-            if it and (overwrite or existing in (None, "", 0)):
-                cell = ws.cell(r, cols["rate"], it["rate"])
-                cell.number_format = "#,##0.00"
-            if "amount" in cols and "qty" in cols and it:
-                q = get_column_letter(cols["qty"])
-                rt = get_column_letter(cols["rate"])
-                ws.cell(r, cols["amount"], f"=IFERROR({q}{r}*{rt}{r},0)").number_format = "#,##0.00"
-            if it:
-                ws.cell(r, extra["Matched Code"], it["code"] or "")
-                ws.cell(r, extra["Matched Description"], it["description"][:250])
-                ws.cell(r, extra["Source"], f'{it["agency"]} {it["edition"]}')
-            ws.cell(r, extra["Match %"], m["score"])
-            st = ws.cell(r, extra["Status"], {"CODE": "Matched by code", "DESC": "Matched by description",
-                                              "REVIEW": "CHECK", "NONE": "No match"}[m["status"]])
-            st.fill = FILLS[m["status"]]
-            report.append({"sheet": ws.title, "row": r, "description": str(desc)[:120], "status": m["status"],
-                           "score": m["score"], "code": it["code"] if it else "", "rate": it["rate"] if it else None,
-                           "unit_boq": unit, "unit_sched": it["unit"] if it else "", "source": f'{it["agency"]} {it["edition"]}' if it else "",
-                           "alts": [f'{a["code"]} | {a["description"][:70]} | {a["rate"]}' for a in m["alts"]]})
-            if progress:
-                progress((r - hr) / max(total_rows, 1))
-        for name, c in extra.items():
-            ws.column_dimensions[get_column_letter(c)].width = 14 if name in ("Match %", "Status", "Source", "Matched Code") else 48
-    if not report:
-        raise ValueError("Could not find a BOQ table (a header row with Description + Unit/Qty/Rate columns).")
-    add_report_sheet(wb, report)
+            if not _blank(rate_cell.value) and not overwrite:
+                if is_item:
+                    res["items"] += 1
+                    res["had_rate"] += 1
+                continue
+            kind, it, conflict, info = matcher.match(_row_codes(ws, r, cols["desc"]), desc)
+            if is_item:
+                res["items"] += 1
+            if it is None:
+                if is_item:
+                    res["not_filled"].append({
+                        "sheet": ws.title, "row": r, "text": re.sub(r"\s+", " ", str(desc))[:80],
+                        "reason": f"code {info} found, but its description is different" if kind == "MISMATCH" else "no exact match"})
+                continue
+            rate_cell.value = it["rate"]
+            if rate_cell.number_format == "General":
+                rate_cell.number_format = "#,##0.00"
+            res["by_code" if kind == "CODE" else "by_desc"] += 1
+            res["conflicts"] += bool(conflict)
+            if "amount" in cols and "qty" in cols:
+                amt = ws.cell(r, cols["amount"])
+                if not isinstance(amt, MergedCell) and _blank(amt.value):
+                    amt.value = f"=IFERROR({get_column_letter(cols['qty'])}{r}*{get_column_letter(cols['rate'])}{r},0)"
+                    if amt.number_format == "General":
+                        amt.number_format = "#,##0.00"
+    if not found_table:
+        raise ValueError("Could not find the BOQ table: a header row with Description and Unit / Qty / Rate columns.")
     wb.save(out_path)
-    return report
-
-
-def add_report_sheet(wb, report):
-    """Second sheet: every BOQ item with the schedule item it was matched to, and alternatives to check."""
-    ws = wb.create_sheet("Match Report", 0)
-    heads = ["BOQ Sheet", "BOQ Row", "BOQ Item Description", "BOQ Unit", "Status", "Match %",
-             "Schedule", "Schedule Code", "Schedule Unit", "Rate (Tk)", "Other close items (code | description | rate)"]
-    ws.append(heads)
-    for c in ws[1]:
-        c.font = Font(bold=True, color="FFFFFF")
-        c.fill = PatternFill("solid", fgColor="1F4E78")
-    label = {"CODE": "Matched by code", "DESC": "Matched by description", "REVIEW": "CHECK", "NONE": "No match"}
-    for r in report:
-        ws.append([r["sheet"], r["row"], r["description"], r["unit_boq"], label[r["status"]], r["score"],
-                   r["source"], r["code"], r["unit_sched"], r["rate"], "\n".join(r["alts"])])
-        ws.cell(ws.max_row, 5).fill = FILLS[r["status"]]
-        ws.cell(ws.max_row, 10).number_format = "#,##0.00"
-    for i, w in enumerate([12, 9, 60, 10, 22, 9, 14, 14, 12, 14, 80], 1):
-        ws.column_dimensions[get_column_letter(i)].width = w
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = ws.dimensions
+    res["filled"] = res["by_code"] + res["by_desc"]
+    return res

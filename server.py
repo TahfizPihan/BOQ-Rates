@@ -14,7 +14,6 @@ from flask import Flask, Response, jsonify, render_template, request, send_file
 
 import db
 from boq import fill_boq
-from matcher import Matcher
 from pdfboq import pdf_to_xlsx
 
 WORK = Path(tempfile.gettempdir()) / "boq_rates_work"
@@ -58,35 +57,28 @@ def process():
         return jsonify(error="Choose a BOQ file first."), 400
     d = WORK / uuid.uuid4().hex
     d.mkdir()
-    src = d / Path(f.filename).name
+    name = Path(f.filename).name
+    src = d / name
     f.save(src)
     ext = src.suffix.lower()
     try:
         if ext == ".pdf":
-            x = src.with_suffix(".xlsx")
+            x = d / (src.stem + ".xlsx")
             pdf_to_xlsx(src, x)
             src = x
-        elif ext == ".csv":
-            import pandas as pd
-            x = src.with_suffix(".xlsx")
-            pd.read_csv(src, header=None, dtype=str, keep_default_na=False).to_excel(x, header=False, index=False)
-            src = x
+        elif ext == ".xls":
+            return jsonify(error="Old .xls files are not supported. Open it in Excel and Save As .xlsx, or upload the PDF."), 400
         elif ext not in (".xlsx", ".xlsm"):
             return jsonify(error="Upload the BOQ as an Excel (.xlsx) or PDF file."), 400
-        out = d / (src.stem + "_priced.xlsx")
-        rep = fill_boq(src, out, agencies=request.form.getlist("agencies") or None,
-                       threshold=int(request.form.get("threshold", 85)),
+        out = d / (Path(name).stem + "_rates.xlsx")
+        res = fill_boq(src, out, agencies=request.form.getlist("agencies") or None,
                        overwrite=request.form.get("overwrite") == "1",
                        rate_col=request.form.get("rate_col", "").strip() or None)
     except Exception as e:
         return jsonify(error=str(e)), 400
     rid = uuid.uuid4().hex
     RESULTS[rid] = out
-    return jsonify(
-        id=rid, filename=out.name, total=len(rep),
-        matched=sum(r["status"] in ("CODE", "DESC") for r in rep),
-        check=sum(r["status"] == "REVIEW" for r in rep),
-        none=sum(r["status"] == "NONE" for r in rep), rows=rep)
+    return jsonify(id=rid, filename=out.name, **res)
 
 
 @app.get("/download/<rid>")
@@ -95,24 +87,6 @@ def download(rid):
     if not p or not p.exists():
         return "Expired - upload the BOQ again", 404
     return send_file(p, as_attachment=True, download_name=p.name)
-
-
-@app.get("/api/search")
-def search():
-    q = request.args.get("q", "").strip()
-    items = db.load_items()
-    if not q or not items:
-        return jsonify([])
-    code = db.norm_code(q)
-    out = [(100, i) for i in items if i["code"] == code] + Matcher(items).search(q, 20)
-    seen, rows = set(), []
-    for s, i in out:
-        if i["id"] in seen:
-            continue
-        seen.add(i["id"])
-        rows.append({"score": s, "agency": i["agency"], "edition": i["edition"], "code": i["code"],
-                     "description": i["description"], "unit": i["unit"], "rate": i["rate"]})
-    return jsonify(rows)
 
 
 if __name__ == "__main__":
