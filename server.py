@@ -1,7 +1,4 @@
-"""BOQ Rate Matcher - web server.
-Local:   python server.py   -> http://localhost:5000
-Hosted:  gunicorn server:app   (see README / render.yaml). Set APP_PASSWORD to require a login.
-"""
+"""BOQ Rate Matcher - web server."""
 import hmac
 import os
 import tempfile
@@ -20,8 +17,8 @@ WORK = Path(tempfile.gettempdir()) / "boq_rates_work"
 WORK.mkdir(exist_ok=True)
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024
-RESULTS = {}  # download id -> output file
-ITEMS = db.sync_from_csv()  # load the rate schedules saved in data/schedules
+RESULTS = {}
+ITEMS = db.sync_from_csv()
 
 
 @app.before_request
@@ -48,6 +45,17 @@ def index():
 @app.get("/api/schedules")
 def list_schedules():
     return jsonify(db.schedules())
+
+
+@app.post("/api/learn")
+def learn_rate():
+    data = request.get_json(silent=True) or {}
+    try:
+        db.add_learned_item(data.get("agency"), data.get("edition"), data.get("code"),
+                            data.get("description"), data.get("unit"), data.get("rate"))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    return jsonify(ok=True, message="Saved. This quotation can be matched on future uploads."), 201
 
 
 @app.post("/api/process")

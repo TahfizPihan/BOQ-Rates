@@ -3,12 +3,12 @@ import csv
 import os
 import re
 import sqlite3
-import tempfile
 from pathlib import Path
 
-# The database is rebuilt from the CSV files in data/schedules on every start,
-# so it lives in a temp folder; the CSV files in the repo are the real storage.
-DB_PATH = Path(os.environ.get("BOQ_DB", Path(tempfile.gettempdir()) / "boq_rates_items.db"))
+# Keep the local database with the application instead of the OS temp directory.
+# Hosted deployments should set BOQ_DB to a persistent-volume path if they need
+# learned quotations to survive a service replacement/redeploy.
+DB_PATH = Path(os.environ.get("BOQ_DB", Path(__file__).parent / "data" / "boq_rates_items.db"))
 DATA_DIR = Path(os.environ.get("BOQ_DATA_DIR", Path(__file__).parent / "data" / "schedules"))
 
 SCHEMA = """
@@ -24,6 +24,19 @@ CREATE TABLE IF NOT EXISTS items (
 );
 CREATE INDEX IF NOT EXISTS idx_code ON items(code);
 CREATE INDEX IF NOT EXISTS idx_agency ON items(agency, edition);
+CREATE TABLE IF NOT EXISTS learned_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agency TEXT NOT NULL,
+    edition TEXT NOT NULL,
+    code TEXT,
+    description TEXT NOT NULL,
+    norm_desc TEXT NOT NULL,
+    unit TEXT,
+    rate REAL NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(agency, edition, norm_desc, unit)
+);
+CREATE INDEX IF NOT EXISTS idx_learned_desc ON learned_items(norm_desc);
 """
 
 UNIT_MAP = {
@@ -62,10 +75,10 @@ def norm_text(s):
     s = s.replace("&", " and ")
     for pat, rep in SYNONYMS:
         s = re.sub(pat, rep, s)
-    s = re.sub(r"(\d)\s*[:/]\s*(\d)", r"\1_\2", s)       # keep mix ratios like 1:2:4 together
-    s = re.sub(r"(\d)\s*(mm|cm|mtr|kg|mpa|psi|nos)\b", r"\1\2", s)  # "12 mm" -> "12mm"
+    s = re.sub(r"(\d)\s*[:/]\s*(\d)", r"\1_\2", s)
+    s = re.sub(r"(\d)\s*(mm|cm|mtr|kg|mpa|psi|nos)\b", r"\1\2", s)
     s = re.sub(r"[^a-z0-9_.% ]+", " ", s)
-    s = re.sub(r"(?<!\d)\.|\.(?!\d)", " ", s)             # drop sentence dots, keep decimals
+    s = re.sub(r"(?<!\d)\.|\.(?!\d)", " ", s)
     return " ".join(w for w in s.split() if w not in STOPWORDS)
 
 
@@ -74,6 +87,7 @@ def norm_code(c):
 
 
 def connect():
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
@@ -104,10 +118,37 @@ def add_items(rows, agency, edition, replace=True):
     return n
 
 
+def add_learned_item(agency, edition, code, description, unit, rate):
+    """Save a user-confirmed quotation independently of rebuilt official schedules."""
+    desc = str(description or "").strip()
+    if not desc or len(desc) > 2000:
+        raise ValueError("Enter an item description (maximum 2,000 characters).")
+    try:
+        value = float(str(rate).replace(",", "").strip())
+    except (TypeError, ValueError):
+        raise ValueError("Enter a valid numeric rate.")
+    if value < 0 or value > 1_000_000_000:
+        raise ValueError("Rate must be between 0 and 1,000,000,000.")
+    agency = str(agency or "").strip()[:40]
+    edition = str(edition or "").strip()[:80]
+    if not agency or not edition:
+        raise ValueError("Choose an organization and enter the schedule edition.")
+    con = connect()
+    con.execute("""INSERT INTO learned_items(agency, edition, code, description, norm_desc, unit, rate)
+                   VALUES(?,?,?,?,?,?,?)
+                   ON CONFLICT(agency, edition, norm_desc, unit) DO UPDATE SET
+                     code=excluded.code, description=excluded.description, rate=excluded.rate""",
+                (agency, edition, norm_code(code), desc, norm_text(desc), norm_unit(unit), value))
+    con.commit()
+    con.close()
+
+
 def schedules():
     con = connect()
     out = [dict(r) for r in con.execute(
-        "SELECT agency, edition, COUNT(*) AS items FROM items GROUP BY agency, edition ORDER BY agency, edition")]
+        "SELECT agency, edition, COUNT(*) AS items FROM items GROUP BY agency, edition "
+        "UNION ALL SELECT agency, edition, COUNT(*) AS items FROM learned_items GROUP BY agency, edition "
+        "ORDER BY agency, edition")]
     con.close()
     return out
 
@@ -126,12 +167,17 @@ def load_items(agencies=None):
         q += " WHERE agency IN (%s)" % ",".join("?" * len(agencies))
         args = list(agencies)
     out = [dict(r) for r in con.execute(q, args)]
+    lq, largs = "SELECT * FROM learned_items", []
+    if agencies:
+        lq += " WHERE agency IN (%s)" % ",".join("?" * len(agencies))
+        largs = list(agencies)
+    out.extend(dict(r) for r in con.execute(lq, largs))
     con.close()
     return out
 
 
 def sync_from_csv(directory=None):
-    """Load every data/schedules/<AGENCY>_<EDITION>.csv (or .xlsx) into the database. Returns item count."""
+    """Load schedule files without deleting user-learned quotations."""
     from importer import read_schedule
     directory = Path(directory or DATA_DIR)
     con = connect()

@@ -10,11 +10,11 @@
   body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
   header{background:var(--brand);color:#fff;padding:20px}
   header h1{margin:0;font-size:21px} header p{margin:4px 0 0;opacity:.88}
-  main{max-width:640px;margin:0 auto;padding:16px;display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}
+  main{max-width:760px;margin:0 auto;padding:16px;display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;min-width:0}
-  button,.btn{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:11px 20px;font:inherit;cursor:pointer;text-decoration:none;display:inline-block}
+  button,.btn{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:10px 16px;font:inherit;cursor:pointer;text-decoration:none;display:inline-block}
   button:hover,.btn:hover{background:var(--brand2)} button:disabled{opacity:.5;cursor:not-allowed}
-  input{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px}
+  input,select{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;max-width:100%}
   .drop{border:2px dashed #b8c2d3;border-radius:12px;padding:34px 16px;text-align:center;color:var(--mute);background:#fafbfd;cursor:pointer}
   .drop.over{border-color:var(--brand);background:#eef4fb} .drop b{color:var(--ink)}
   .note{background:#fff8e1;border:1px solid #f0d98a;border-radius:10px;padding:12px 14px;margin-bottom:12px}
@@ -22,58 +22,49 @@
   .ok{background:#e8f6ec;border:1px solid #b5dfc1;border-radius:10px;padding:14px}
   .hidden{display:none} .mute{color:var(--mute)} summary{cursor:pointer;margin-top:10px}
   ul{margin:8px 0 0;padding-left:20px;font-size:14px} .row{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+  .unmatched{border-top:1px solid var(--line);padding:14px 0}.unmatched:first-child{border-top:0}
+  .quote{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:10px}.quote input,.quote select{width:100%}
+  .suggestion{background:#f5f6f8;border-radius:8px;padding:8px;margin-top:8px;font-size:13px}
 </style>
 </head>
 <body>
-<header>
-  <h1>BOQ Rate Matcher</h1>
-  <p>Upload your BOQ (Excel or PDF). You get the same file back as Excel with the rates filled in.</p>
-</header>
+<header><h1>BOQ Rate Matcher</h1><p>Upload a BOQ and review unmatched items. Your confirmed quotations are remembered for later projects.</p></header>
 <main>
   <section class="card">
-    <div id="empty" class="note hidden"><b>No rate schedule is loaded yet.</b> Add the schedule links in <code>sources.json</code> on GitHub
-      and run &ldquo;Build rate schedules&rdquo; (see README), then reload this page.</div>
-
+    <div id="empty" class="note hidden"><b>No rate schedule is loaded yet.</b> Run the Build rate schedules workflow in GitHub Actions.</div>
     <div id="drop" class="drop"><b>Tap to choose</b> your BOQ (.xlsx or .pdf) or drag it here<br><span id="fname"></span></div>
     <input id="boqFile" type="file" accept=".xlsx,.xlsm,.pdf" class="hidden">
-
-    <details>
-      <summary class="mute">Options</summary>
+    <details><summary class="mute">Options</summary>
       <div class="row" style="margin-top:10px">
         <label>Rate column (if the file has none marked) <input id="col" maxlength="3" placeholder="auto" style="width:70px;text-transform:uppercase"></label>
         <label><input id="over" type="checkbox"> Replace rates already in the file</label>
       </div>
       <div id="agencyBox" class="row hidden" style="margin-top:10px"><span class="mute">Use only:</span><span id="agencies"></span></div>
     </details>
-
     <div class="row" style="margin-top:16px"><button id="go" disabled>Fill rates</button><span id="busy" class="mute hidden">Working&hellip; large files can take a minute.</span></div>
     <div id="err" class="err hidden"></div>
   </section>
-
   <section id="result" class="card hidden">
-    <div class="ok">
-      <b id="summary"></b>
-      <div id="how" class="mute" style="font-size:14px;margin-top:2px"></div>
+    <div class="ok"><b id="summary"></b><div id="how" class="mute" style="font-size:14px;margin-top:2px"></div>
       <div style="margin-top:12px"><a id="dl" class="btn" href="#">&#11015; Download Excel</a></div>
     </div>
-    <details id="nfBox"><summary><span id="nfTitle"></span></summary><ul id="nfList"></ul></details>
+    <div id="nfList"></div>
   </section>
 </main>
-
 <script>
 const $ = s => document.querySelector(s);
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let schedules = [];
-
 (async () => {
-  schedules = await (await fetch('/api/schedules')).json();
-  $('#empty').classList.toggle('hidden', schedules.length > 0);
-  const ags = [...new Set(schedules.map(s => s.agency))];
-  if(ags.length > 1){ $('#agencyBox').classList.remove('hidden');
-    $('#agencies').innerHTML = ags.map(a => `<label style="margin-right:10px"><input type="checkbox" class="ag" value="${esc(a)}" checked> ${esc(a)}</label>`).join(''); }
-  upd();
+  try {
+    schedules = await (await fetch('/api/schedules')).json();
+    $('#empty').classList.toggle('hidden', schedules.length > 0);
+    const ags = [...new Set(schedules.map(s => s.agency))];
+    if(ags.length > 1){ $('#agencyBox').classList.remove('hidden');
+      $('#agencies').innerHTML = ags.map(a => `<label style="margin-right:10px"><input type="checkbox" class="ag" value="${esc(a)}" checked> ${esc(a)}</label>`).join(''); }
+    upd();
+  } catch(e) { $('#err').textContent = 'Could not load schedules. Refresh the page and try again.'; $('#err').classList.remove('hidden'); }
 })();
-
 const drop = $('#drop'), boq = $('#boqFile');
 drop.onclick = () => boq.click();
 ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => {e.preventDefault(); drop.classList.add('over');}));
@@ -82,7 +73,20 @@ drop.addEventListener('drop', e => { if(e.dataTransfer.files[0]){ boq.files = e.
 boq.onchange = picked;
 function picked(){ $('#fname').innerHTML = boq.files[0] ? `<br>&#128196; <b>${esc(boq.files[0].name)}</b>` : ''; $('#result').classList.add('hidden'); upd(); }
 function upd(){ $('#go').disabled = !(boq.files[0] && schedules.length); }
-
+function quoteForm(x, idx) {
+  const agencies = [...new Set(schedules.map(s => s.agency))];
+  const options = agencies.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('') + '<option value="Other">Other</option>';
+  const suggestions = (x.suggestions || []).map(s => `<div class="suggestion">Possible match (${s.score}%): <b>${esc(s.agency)} ${esc(s.edition)}</b> · ${esc(s.code)} · ${esc(s.description)} · ${esc(s.unit)} · Tk ${esc(s.rate)}</div>`).join('');
+  return `<div class="unmatched"><b>Row ${x.row}:</b> ${esc(x.text)} <span class="mute">— ${esc(x.reason)}</span>${suggestions}
+    <form class="quote" data-index="${idx}">
+      <select name="agency" aria-label="Rate schedule organization">${options}</select>
+      <input name="edition" placeholder="Schedule year/edition" value="User quotation" required aria-label="Edition">
+      <input name="code" placeholder="Item code (optional)" aria-label="Item code">
+      <input name="unit" placeholder="Unit" value="${esc(x.unit || '')}" aria-label="Unit">
+      <input name="rate" type="number" min="0" step="0.01" placeholder="Rate (Tk)" required aria-label="Rate">
+      <button type="submit">Save quotation</button><span class="save-status mute" aria-live="polite"></span>
+    </form></div>`;
+}
 $('#go').onclick = async () => {
   const btn = $('#go'); btn.disabled = true; $('#busy').classList.remove('hidden'); $('#err').classList.add('hidden'); $('#result').classList.add('hidden');
   const fd = new FormData(); fd.append('file', boq.files[0]); fd.append('rate_col', $('#col').value);
@@ -97,15 +101,25 @@ $('#go').onclick = async () => {
     if(j.had_rate) parts.push(`${j.had_rate} already had a rate`);
     $('#how').textContent = parts.join(' · ') + (j.conflicts ? ` · ${j.conflicts} found in more than one schedule with different rates (PWD, then LGED, then RHD used)` : '');
     $('#dl').href = '/download/' + j.id;
-    const nf = j.not_filled;
-    $('#nfBox').classList.toggle('hidden', nf.length === 0);
-    $('#nfTitle').textContent = `${nf.length} item${nf.length===1?'':'s'} left blank (no exact match)`;
-    $('#nfList').innerHTML = nf.slice(0, 60).map(x => `<li>Row ${x.row}&nbsp;&middot;&nbsp;${esc(x.text)} <span class="mute">&mdash; ${esc(x.reason)}</span></li>`).join('')
-      + (nf.length > 60 ? `<li class="mute">&hellip;and ${nf.length - 60} more</li>` : '');
+    $('#nfList').innerHTML = j.not_filled.length ? `<h3>Unmatched items (${j.not_filled.length})</h3><p class="mute">Review possible matches or enter the correct quotation. Saved quotations are available on future uploads.</p>` + j.not_filled.map(quoteForm).join('') : '<p>All items were matched.</p>';
     $('#result').classList.remove('hidden'); $('#result').scrollIntoView({behavior:'smooth'});
   }catch(e){ $('#err').textContent = e.message; $('#err').classList.remove('hidden'); }
   $('#busy').classList.add('hidden'); upd();
 };
+$('#nfList').addEventListener('submit', async e => {
+  if(e.target.matches('form.quote')) {
+    e.preventDefault();
+    const form = e.target, status = form.querySelector('.save-status'), values = Object.fromEntries(new FormData(form));
+    const row = form.closest('.unmatched');
+    const data = {...values, description: row.querySelector('b').nextSibling.textContent.trim(), unit: values.unit};
+    status.textContent = 'Saving…';
+    try {
+      const r = await fetch('/api/learn', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+      const j = await r.json(); if(!r.ok) throw new Error(j.error || 'Could not save');
+      status.textContent = j.message; status.style.color = '#176b32';
+    } catch(err) { status.textContent = err.message; status.style.color = '#8a1c1c'; }
+  }
+});
 </script>
 </body>
 </html>

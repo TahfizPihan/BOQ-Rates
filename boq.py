@@ -1,4 +1,4 @@
-"""Fill the rate column of the person's own BOQ file. Nothing else in the file is changed or added."""
+"""Fill the rate column of the person's own BOQ file. Unrelated columns are preserved."""
 import re
 
 from openpyxl import load_workbook
@@ -24,6 +24,8 @@ def _is(cell, kind):
 
 
 def find_header(ws, scan_rows=40):
+    """Find the strongest row containing a description and at least two table fields."""
+    best = None
     for r in range(1, min(ws.max_row, scan_rows) + 1):
         cols = {}
         for c in range(1, ws.max_column + 1):
@@ -33,8 +35,10 @@ def find_header(ws, scan_rows=40):
                     cols[kind] = c
                     break
         if "desc" in cols and len(cols) >= 3:
-            return r, cols
-    return None, None
+            score = len(cols) + (2 if "rate" in cols else 0) + (1 if "qty" in cols else 0)
+            if best is None or score > best[0]:
+                best = (score, r, cols)
+    return (best[1], best[2]) if best else (None, None)
 
 
 def _blank(v):
@@ -42,13 +46,11 @@ def _blank(v):
 
 
 def _row_codes(ws, r, desc_col):
-    """Anything in the columns left of the description that looks like an item code."""
     out = []
     for c in range(1, desc_col):
         v = ws.cell(r, c).value
-        if v is None:
-            continue
-        out += [t for t in re.split(r"[\s,;]+", str(v).strip()) if is_distinct_code(t)]
+        if v is not None:
+            out += [t for t in re.split(r"[\s,;]+", str(v).strip()) if is_distinct_code(t)]
     return out
 
 
@@ -72,7 +74,7 @@ def fill_boq(in_path, out_path, agencies=None, overwrite=False, rate_col=None):
                 raise ValueError(f"'{rate_col}' is not a column letter (use letters such as F or G).")
             if cols["rate"] == cols["desc"]:
                 raise ValueError("The rate column cannot be the Description column.")
-        if "rate" not in cols:  # the file has no rate column at all: add one at the end, styled like its neighbour
+        if "rate" not in cols:
             col = ws.max_column + 1
             ws.cell(hr, col, "Rate (Tk)")._style = ws.cell(hr, col - 1)._style
             cols["rate"] = col
@@ -81,7 +83,7 @@ def fill_boq(in_path, out_path, agencies=None, overwrite=False, rate_col=None):
         for r in range(hr + 1, ws.max_row + 1):
             desc = ws.cell(r, cols["desc"]).value
             if desc is None or not str(desc).strip() or _is(desc, "desc"):
-                continue  # empty row, or a table header repeated on a new PDF page
+                continue
             unit = ws.cell(r, cols["unit"]).value if "unit" in cols else None
             qty = ws.cell(r, cols["qty"]).value if "qty" in cols else None
             is_item = not (_blank(unit) and _blank(qty)) if ("unit" in cols or "qty" in cols) else True
@@ -93,16 +95,18 @@ def fill_boq(in_path, out_path, agencies=None, overwrite=False, rate_col=None):
                     res["items"] += 1
                     res["had_rate"] += 1
                 continue
-            kind, it, conflict, info = matcher.match(_row_codes(ws, r, cols["desc"]), desc)
+            kind, item, conflict, info = matcher.match(_row_codes(ws, r, cols["desc"]), desc)
             if is_item:
                 res["items"] += 1
-            if it is None:
+            if item is None:
                 if is_item:
                     res["not_filled"].append({
-                        "sheet": ws.title, "row": r, "text": re.sub(r"\s+", " ", str(desc))[:80],
-                        "reason": f"code {info} found, but its description is different" if kind == "MISMATCH" else "no exact match"})
+                        "sheet": ws.title, "row": r, "text": re.sub(r"\s+", " ", str(desc))[:160],
+                        "reason": f"code {info} found, but its description is different" if kind == "MISMATCH" else "no exact match",
+                        "unit": str(unit or ""), "suggestions": matcher.suggest(desc, unit),
+                    })
                 continue
-            rate_cell.value = it["rate"]
+            rate_cell.value = item["rate"]
             if rate_cell.number_format == "General":
                 rate_cell.number_format = "#,##0.00"
             res["by_code" if kind == "CODE" else "by_desc"] += 1

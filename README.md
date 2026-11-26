@@ -1,53 +1,30 @@
 # BOQ Rate Matcher
 
-Upload your BOQ (Excel or PDF). You get the **same file back as Excel** with the rate filled into the file's own Rate column.
-Nothing else is added to your file: no extra columns, no extra sheets.
+Upload your BOQ (Excel or PDF). You get the same file back as Excel with rates filled in. Unrelated columns (including organization/agency columns) are preserved.
 
-## What it does with your file
-1. **Excel BOQ** is used exactly as it is (layout, colours, merged cells, column widths stay).
-   **PDF BOQ** is first converted to an Excel sheet that looks like the PDF (title, table, notes).
-2. For every item it finds the rate in the PWD / LGED / RHD schedule, **only on an exact match**:
-   - the **description** is the same as the schedule's (upper/lower case, spaces and punctuation are ignored), or
-   - the **item code** (in a column left of the description, or written in the description such as `4.1.2 Brick work...`)
-     exists in the schedule and the description belongs to that item.
-   Plain serial numbers (1, 2, 3...) are never treated as item codes.
-3. The rate is written into the Rate column (and Amount = Qty x Rate if the Amount cell is empty).
-   Rates already typed in the file are kept.
-4. Items with no exact match are **left blank** and listed on the page (tap "items left blank"). Nothing is guessed.
+## What it does
+- Fills rates only for exact description matches or a schedule item code confirmed by the description. Similar items are shown as suggestions for human review; they are never silently priced.
+- Lists each unmatched item with possible schedule matches and a form to enter its confirmed quotation (organization, edition, code, unit, and rate).
+- Saves user-confirmed quotations in a separate learned-rate table. They survive official schedule refreshes and match future uploads when the BOQ description and unit agree.
+- Supports PWD, LGED, RHD, and other schedule sources. When rates conflict, PWD is preferred, then LGED, then RHD.
+- Keeps rates already in the BOQ unless you select “Replace rates already in the file.”
 
-If the same description is in more than one schedule with different rates, PWD is used first, then LGED, then RHD.
+## Load the official schedules
+`sources.json` is configured with the current PWD and LGED sources and the two RHD PDFs supplied for the 2026 and 2024 editions. To build/load them:
 
-## One-time setup (about 15 minutes)
-### 1. Put the code on GitHub
-Create an empty repository on github.com, then in this folder:
-```
-git remote add origin https://github.com/<your-username>/<repo-name>.git
-git branch -M main
-git push -u origin main
-```
-(If you already pushed the earlier version, just run `git push`.)
+1. Open the repository's **Actions** tab.
+2. Select **Build rate schedules** → **Run workflow**.
+3. Check the workflow log for the number of items read from each PDF. Failed/low-count imports do not replace existing schedule data.
+4. After the workflow succeeds, allow the web service to redeploy/restart so it loads the new CSV files.
 
-### 2. Load the rate schedules from their PDF links
-1. In `sources.json` on GitHub check the links (add the RHD link).
-2. Repo **Actions** tab -> **Build rate schedules** -> **Run workflow**. GitHub downloads each PDF once and saves the item
-   codes, descriptions, units and rates in `data/schedules/`. You never need to open these files.
-3. Read the run log: it shows how many items were read from each PDF and a few sample rows. Compare with the PDF.
-   A PDF that cannot be read is reported and never overwrites existing data. In that case put the schedule as
-   Excel/CSV into `data/schedules/` named `AGENCY_EDITION.xlsx` (columns: code, description, unit, rate).
+PDF extraction is layout-dependent. Verify the counts and sample rows in the action log, and check rates before tender submission. Picture-only/scanned PDFs may need OCR or an Excel/CSV source.
 
-### 3. Host it so every device can use it (free)
-render.com -> **New** -> **Blueprint** -> pick the repo (`render.yaml` does the rest) and set **APP_PASSWORD**.
-Open the address Render gives you on any phone or computer. The free plan sleeps when idle; the first visit takes about a minute.
+## Remembering quotations
+Local use stores learned rates in `data/boq_rates_items.db`. Hosted services should set `BOQ_DB` to a persistent-volume path to keep user quotations across service replacement or redeploy; the default filesystem on many free hosting plans is ephemeral. Do not commit the database file or share the service without protecting it with `APP_PASSWORD`.
 
 ## Daily use
-Open the site -> choose your BOQ (.xlsx or .pdf) -> **Fill rates** -> **Download Excel**.
-Options: rate column letter (only needed if the file has no column headed Rate), replace existing rates, choose agencies.
+1. Upload `.xlsx`, `.xlsm`, or a text-based `.pdf` BOQ and click **Fill rates**.
+2. Download the Excel output and review the unmatched items.
+3. For each missing rate, enter the quotation from the appropriate PWD/LGED/RHD schedule and click **Save quotation**. It is then available for future BOQs with the same item description/unit.
 
-## Run on your own computer instead
-Double-click `start.bat` (Windows) or run `./start.sh`, then open http://localhost:5000.
-
-## Limits
-- Old `.xls` files: save as `.xlsx` first. Scanned or picture-only PDFs cannot be read (BOQ or schedule).
-- Exact matching is only as good as the schedule reading. If many items stay blank although you know they are in the
-  schedule, the schedule PDF was probably read differently from how your BOQ words it. Send me the schedule file and the BOQ and I will adjust the reader.
-- Check the blank rows before submitting a tender.
+Excel layout is preserved as far as openpyxl allows. Scanned PDFs, old `.xls` workbooks, and highly irregular PDFs need conversion to a readable Excel file first.

@@ -1,4 +1,3 @@
 __pycache__/
-*.pyc
-*.db
-.env
+*.py[cod]
+data/boq_rates_items.db
